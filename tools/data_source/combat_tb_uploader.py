@@ -5,6 +5,8 @@
 # to be reflected in galaxy.web.controllers.tool_runner and galaxy.tools
 from __future__ import print_function
 
+import cProfile
+import logging
 import codecs
 import gzip
 import os
@@ -12,9 +14,12 @@ import shutil
 import sys
 import tempfile
 import zipfile
+import multiprocessing
 from json import dumps, loads
 
 from six.moves.urllib.request import urlopen
+
+sys.path.insert(0, "/home/zipho/workspace/sanbi/dev/galaxy/lib")
 
 from galaxy import util
 from galaxy.datatypes import sniff
@@ -23,6 +28,8 @@ from galaxy.datatypes.registry import Registry
 from galaxy.datatypes.util.image_util import get_image_ext
 from galaxy.util import multi_byte
 from galaxy.util.checkers import check_binary, check_bz2, check_gzip, check_html, check_image, check_zip
+
+log = logging.getLogger( __name__ )
 
 try:
     import Image as PIL
@@ -79,7 +86,19 @@ def parse_outputs( args ):
         rval[int( id )] = ( path, files_path )
     return rval
 
+def do_cprofile(func):
+    def profiled_func(*args, **kwargs):
+        profile = cProfile.Profile()
+        try:
+            profile.enable()
+            result = func(*args, **kwargs)
+            profile.disable()
+            return result
+        finally:
+            profile.print_stats(sort='time')
+    return profiled_func
 
+#@do_cprofile
 def add_file( dataset, registry, json_file, output_path ):
     data_type = None
     line_count = None
@@ -88,20 +107,15 @@ def add_file( dataset, registry, json_file, output_path ):
     link_data_only = dataset.get( 'link_data_only', 'copy_files' )
     in_place = dataset.get( 'in_place', True )
     purge_source = dataset.get( 'purge_source', True )
+
+    #----------------- The following checks the sanity of the uploaded dataset -----------------#
+    # Looking for the file type on the file
     try:
         ext = dataset.file_type
     except AttributeError:
         file_err( 'Unable to process uploaded file, missing file_type parameter.', dataset, json_file )
         return
 
-    if dataset.type == 'url':
-        try:
-            page = urlopen( dataset.path )  # page will be .close()ed by sniff methods
-            temp_name, dataset.is_multi_byte = sniff.stream_to_file( page, prefix='url_paste', source_encoding=util.get_charset_from_http_headers( page.headers ) )
-        except Exception as e:
-            file_err( 'Unable to fetch %s\n%s' % ( dataset.path, str( e ) ), dataset, json_file )
-            return
-        dataset.path = temp_name
     # See if we have an empty file
     if not os.path.exists( dataset.path ):
         file_err( 'Uploaded temporary file (%s) does not exist.' % dataset.path, dataset, json_file )
@@ -109,37 +123,33 @@ def add_file( dataset, registry, json_file, output_path ):
     if not os.path.getsize( dataset.path ) > 0:
         file_err( 'The uploaded file is empty', dataset, json_file )
         return
-    if not dataset.type == 'url':
-        # Already set is_multi_byte above if type == 'url'
-        try:
-            dataset.is_multi_byte = multi_byte.is_multi_byte( codecs.open( dataset.path, 'r', 'utf-8' ).read( 100 ) )
-        except UnicodeDecodeError as e:
-            dataset.is_multi_byte = False
-    # Is dataset an image?
-    image = check_image( dataset.path )
-    if image:
-        if not PIL:
-            image = None
-        # get_image_ext() returns None if nor a supported Image type
-        ext = get_image_ext( dataset.path, image )
-        data_type = ext
+
+    #---------------- The following attempts to set the dataset ext and datatype ----------------------------#
+    # this attempts to set the multi_byte of the dataset
+    try:
+        dataset.is_multi_byte = multi_byte.is_multi_byte( codecs.open( dataset.path, 'r', 'utf-8' ).read( 100 ) )
+    except UnicodeDecodeError as e:
+        dataset.is_multi_byte = False
+
     # Is dataset content multi-byte?
-    elif dataset.is_multi_byte:
+    if dataset.is_multi_byte:
         data_type = 'multi-byte char'
         ext = sniff.guess_ext( dataset.path, registry.sniff_order, is_multi_byte=True )
     # Is dataset content supported sniffable binary?
     else:
-        # FIXME: This ignores the declared sniff order in datatype_conf.xml
-        # resulting in improper behavior
+        # FIXME: This ignores the declared sniff order in datatype_conf.xml resulting in improper behavior
         type_info = Binary.is_sniffable_binary( dataset.path )
         if type_info:
             data_type = type_info[0]
             ext = type_info[1]
+
     is_gzipped, is_valid = check_gzip(dataset.path)
     if is_gzipped and is_valid:
         ext = sniff.guess_ext(dataset.path,registry.sniff_order)
         if ext:
             data_type = ext
+
+    #------------------ The following attempts to set the dataset ext and datatype, if the above failed -----#
     if not data_type:
         root_datatype = registry.get_datatype_by_extension( dataset.file_type )
         if getattr( root_datatype, 'compressed', False ):
@@ -178,6 +188,7 @@ def add_file( dataset, registry, json_file, output_path ):
                     os.chmod(dataset.path, 0o644)
                 dataset.name = dataset.name.rstrip( '.gz' )
                 data_type = 'gzip'
+
             if not data_type and bz2 is not None:
                 # See if we have a bz2 file, much like gzip
                 is_bzipped, is_valid = check_bz2( dataset.path )
@@ -268,6 +279,7 @@ def add_file( dataset, registry, json_file, output_path ):
                             os.chmod(dataset.path, 0o644)
                             dataset.name = uncompressed_name
                     data_type = 'zip'
+
             if not data_type:
                 # TODO refactor this logic.  check_binary isn't guaranteed to be
                 # correct since it only looks at whether the first 100 chars are
@@ -287,30 +299,20 @@ def add_file( dataset, registry, json_file, output_path ):
                             err_msg = "You must manually set the 'File Format' to '%s' when uploading %s files." % ( ext.capitalize(), ext )
                             file_err( err_msg, dataset, json_file )
                             return
+
             if not data_type:
                 # We must have a text file
                 if check_html( dataset.path ):
                     file_err( 'The uploaded file contains inappropriate HTML content', dataset, json_file )
                     return
+
             if data_type != 'binary':
-                if link_data_only == 'copy_files':
-                    if dataset.type in ( 'server_dir', 'path_paste' ) and data_type not in [ 'gzip', 'bz2', 'zip' ]:
-                        in_place = False
-                    # Convert universal line endings to Posix line endings, but allow the user to turn it off,
-                    # so that is becomes possible to upload gzip, bz2 or zip files with binary data without
-                    # corrupting the content of those files.
-                    if dataset.to_posix_lines:
-                        tmpdir = output_adjacent_tmpdir( output_path )
-                        tmp_prefix = 'data_id_%s_convert_' % dataset.dataset_id
-                        if dataset.space_to_tab:
-                            line_count, converted_path = sniff.convert_newlines_sep2tabs( dataset.path, in_place=in_place, tmp_dir=tmpdir, tmp_prefix=tmp_prefix )
-                        else:
-                            line_count, converted_path = sniff.convert_newlines( dataset.path, in_place=in_place, tmp_dir=tmpdir, tmp_prefix=tmp_prefix )
                 if dataset.file_type == 'auto':
                     ext = sniff.guess_ext( dataset.path, registry.sniff_order )
                 else:
                     ext = dataset.file_type
                 data_type = ext
+
     # Save job info for the framework
     if ext == 'auto' and dataset.ext:
         ext = dataset.ext
@@ -356,43 +358,6 @@ def add_file( dataset, registry, json_file, output_path ):
         # Groom the dataset content if necessary
         datatype.groom_dataset_content( output_path )
 
-
-def add_composite_file( dataset, json_file, output_path, files_path ):
-        if dataset.composite_files:
-            os.mkdir( files_path )
-            for name, value in dataset.composite_files.items():
-                value = util.bunch.Bunch( **value )
-                if dataset.composite_file_paths[ value.name ] is None and not value.optional:
-                    file_err( 'A required composite data file was not provided (%s)' % name, dataset, json_file )
-                    break
-                elif dataset.composite_file_paths[value.name] is not None:
-                    dp = dataset.composite_file_paths[value.name][ 'path' ]
-                    isurl = dp.find('://') != -1  # todo fixme
-                    if isurl:
-                        try:
-                            temp_name, dataset.is_multi_byte = sniff.stream_to_file( urlopen( dp ), prefix='url_paste' )
-                        except Exception as e:
-                            file_err( 'Unable to fetch %s\n%s' % ( dp, str( e ) ), dataset, json_file )
-                            return
-                        dataset.path = temp_name
-                        dp = temp_name
-                    if not value.is_binary:
-                        tmpdir = output_adjacent_tmpdir( output_path )
-                        tmp_prefix = 'data_id_%s_convert_' % dataset.dataset_id
-                        if dataset.composite_file_paths[ value.name ].get( 'space_to_tab', value.space_to_tab ):
-                            sniff.convert_newlines_sep2tabs( dp, tmp_dir=tmpdir, tmp_prefix=tmp_prefix )
-                        else:
-                            sniff.convert_newlines( dp, tmp_dir=tmpdir, tmp_prefix=tmp_prefix )
-                    shutil.move( dp, os.path.join( files_path, name ) )
-        # Move the dataset to its "real" path
-        shutil.move( dataset.primary_file, output_path )
-        # Write the job info
-        info = dict( type='dataset',
-                     dataset_id=dataset.dataset_id,
-                     stdout='uploaded %s file' % dataset.file_type )
-        json_file.write( dumps( info ) + "\n" )
-
-
 def output_adjacent_tmpdir( output_path ):
     """ For temp files that will ultimately be moved to output_path anyway
     just create the file directly in output_path's directory so shutil.move
@@ -400,32 +365,39 @@ def output_adjacent_tmpdir( output_path ):
     """
     return os.path.dirname( output_path )
 
+class uploadFileObject():
+    def __init__(self, params):
+        self.dataset, self.root_dir, self.config, self.json_file, self.output_path = params
+
+def upload_worker(obj):
+    dataset, root_dir, config, json_file, output_path = obj.dataset, obj.root_dir, obj.config, obj.json_file, obj.output_path
+    registry = Registry()
+    registry.load_datatypes(root_dir=root_dir, config=config)
+    add_file(dataset, registry, open( 'galaxy.json', 'w' ), output_path)
 
 def __main__():
 
     if len( sys.argv ) < 4:
-        print('usage: upload.py <root> <datatypes_conf> <json paramfile> <output spec> ...', file=sys.stderr)
+        print('usage: combat_tb_uploader.py <root> <datatypes_conf> <json paramfile> <output spec> ...', file=sys.stderr)
         sys.exit( 1 )
 
     output_paths = parse_outputs( sys.argv[4:] )
     json_file = open( 'galaxy.json', 'w' )
 
     registry = Registry()
-    registry.load_datatypes( root_dir=sys.argv[1], config=sys.argv[2] )
+    registry.load_datatypes(root_dir=sys.argv[1], config=sys.argv[2])
 
     for line in open( sys.argv[3], 'r' ):
         dataset = loads( line )
-        dataset = util.bunch.Bunch( **safe_dict( dataset ) )
+        dataset = util.bunch.Bunch(**safe_dict(dataset))
         try:
-            output_path = output_paths[int( dataset.dataset_id )][0]
+            output_path = output_paths[int(dataset.dataset_id)][0]
         except:
             print('Output path for dataset %s not found on command line' % dataset.dataset_id, file=sys.stderr)
             sys.exit( 1 )
-        if dataset.type == 'composite':
-            files_path = output_paths[int( dataset.dataset_id )][1]
-            add_composite_file( dataset, json_file, output_path, files_path )
-        else:
-            add_file( dataset, registry, json_file, output_path )
+        pool = multiprocessing.Pool(multiprocessing.cpu_count())
+        objList = [uploadFileObject((dataset, sys.argv[1], sys.argv[2], json_file, output_path))]
+        pool.map(upload_worker, objList)
 
     # clean up paramfile
     # TODO: this will not work when running as the actual user unless the
