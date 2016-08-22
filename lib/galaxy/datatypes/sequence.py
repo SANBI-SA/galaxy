@@ -553,7 +553,7 @@ class Fastq ( Sequence ):
     """Class representing a generic FASTQ sequence"""
     edam_format = "format_1930"
     file_ext = "fastq"
-    MetadataElement( name="is_gzipped", desc="Indicates whether fastq is gzip compressed", readonly=True, defaule= False, optional=True, visible=True, no_value=False )
+    MetadataElement( name="is_gzipped", desc="Indicates whether fastq is gzip compressed", readonly=True, default= False, optional=True, visible=True, no_value=False )
 
     def set_meta( self, dataset, **kwd ):
         """
@@ -564,7 +564,7 @@ class Fastq ( Sequence ):
         if self.max_optional_metadata_filesize >= 0 and dataset.get_size() > self.max_optional_metadata_filesize:
             dataset.metadata.data_lines = None
             dataset.metadata.sequences = None
-            dataset.metadata.is_gzipped = False
+            dataset.metadata.is_gzipped = is_gzip(dataset.file_name)
             return
         data_lines = 0
         sequences = 0
@@ -594,6 +594,7 @@ class Fastq ( Sequence ):
             sequences += 1
         dataset.metadata.data_lines = data_lines
         dataset.metadata.sequences = sequences
+        dataset.metadata.is_gzipped = is_gzipped
 
     def sniff( self, filename ):
         """

@@ -77,6 +77,7 @@ class Data( object ):
 
     # Add metadata elements
     MetadataElement( name="dbkey", desc="Database/Build", default="?", param=metadata.DBKeyParameter, multiple=False, no_value="?" )
+
     # Stores the set of display applications, and viewing methods, supported by this datatype
     supported_display_apps = {}
     # If False, the peek is regenerated whenever a dataset of this type is copied
