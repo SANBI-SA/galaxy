@@ -1141,6 +1141,14 @@ class JobWrapper( object ):
         remote_working_directory=None,
         remote_metadata_directory=None,
     ):
+
+
+        log.debug("==========================================================")
+        log.debug( self.get_state() )
+        log.debug( stdout )
+        log.debug( stderr )
+        log.debug("==========================================================")
+
         """
         Called to indicate that the associated command has been run. Updates
         the output datasets based on stderr and stdout from the command, and
@@ -1425,6 +1433,12 @@ class JobWrapper( object ):
         self.cleanup( delete_files=delete_files )
 
     def check_tool_output( self, stdout, stderr, tool_exit_code, job ):
+        log.debug("-----------------------CHECK TOOL OUTPUT (__init__.py)--------------------------------")
+        log.debug(stdout)
+        log.debug(stderr)
+        log.debug(tool_exit_code)
+        log.debug(job)
+        log.debug("--------------------------------------------------------------------------------------")
         return check_output( self.tool, stdout, stderr, tool_exit_code, job )
 
     def cleanup( self, delete_files=True ):
