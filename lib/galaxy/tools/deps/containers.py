@@ -1,16 +1,18 @@
+import logging
+import os
+import string
+
 from abc import (
     ABCMeta,
     abstractmethod
 )
-import os
-import string
 
 import six
 
 from galaxy.util import asbool
+
 from ..deps import docker_util
 
-import logging
 log = logging.getLogger(__name__)
 
 DEFAULT_CONTAINER_TYPE = "docker"
@@ -326,12 +328,16 @@ class DockerContainer(Container):
             # We have a Pulsar job directory, so everything needed (excluding index
             # files) should be available in job_directory...
             defaults = "$job_directory:ro,$tool_directory:ro,$job_directory/outputs:rw,$working_directory:rw"
-        elif self.app_info.outputs_to_working_directory:
-            # Should need default_file_path (which is a course estimate given
-            # object stores anyway).
-            defaults = "$galaxy_root:ro,$tool_directory:ro,$job_directory:ro,$working_directory:rw,$default_file_path:ro"
         else:
-            defaults = "$galaxy_root:ro,$tool_directory:ro,$job_directory:ro,$working_directory:rw,$default_file_path:rw"
+            defaults = "$galaxy_root:ro,$tool_directory:ro"
+            if self.job_info.job_directory:
+                defaults += ",$job_directory:ro"
+            if self.app_info.outputs_to_working_directory:
+                # Should need default_file_path (which is a course estimate given
+                # object stores anyway).
+                defaults += ",$working_directory:rw,$default_file_path:ro"
+            else:
+                defaults += ",$working_directory:rw,$default_file_path:rw"
 
         if self.app_info.library_import_dir:
             defaults += ",$library_import_dir:ro"

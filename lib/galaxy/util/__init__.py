@@ -22,13 +22,14 @@ import sys
 import tempfile
 import threading
 import time
+
 from datetime import datetime
 from hashlib import md5
 from os.path import normpath, relpath
 from xml.etree import ElementInclude, ElementTree
 
 from six import binary_type, iteritems, PY3, string_types, text_type
-from six.moves import email_mime_text, email_mime_multipart, xrange, zip
+from six.moves import email_mime_multipart, email_mime_text, xrange, zip
 from six.moves.urllib import parse as urlparse
 from six.moves.urllib import request as urlrequest
 
@@ -62,6 +63,7 @@ bz2_magic = 'BZh'
 DEFAULT_ENCODING = os.environ.get('GALAXY_DEFAULT_ENCODING', 'utf-8')
 NULL_CHAR = '\000'
 BINARY_CHARS = [ NULL_CHAR ]
+FILENAME_VALID_CHARS = '.,^_-()[]0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 
 def remove_protocol_from_url( url ):
