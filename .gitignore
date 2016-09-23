@@ -67,8 +67,7 @@ workflow_schedulers_conf.xml
 config/*
 config/plugins/interactive_environments/**/*.ini
 !config/plugins
-static/welcome.html.*
-static/welcome.html
+
 
 # Tool data.
 tool-data/annotation_profiler_options.xml
