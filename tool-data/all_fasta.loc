@@ -16,5 +16,5 @@
 #fasta file. So there will be multiple fasta files for each build,
 #such as with hg19 above.
 #
-viq1    viq1    Venturia inequalis: viq1    /cip0/research/pvh/venturia-genome/v.inaequalis.genome.fasta                                                                                                                                                                         
-H37Rv   H37Rv   TB Reference Genome: H37Rv  /cip0/research/projects/combattb/data/zahra/reference_H37Rv.fasta
+viq1	viq1	Venturia inequalis:viq1	/cip0/research/pvh/venturia-genome/v.inaequalis.genome.fasta
+H37Rv	H37Rv	TB Reference Genome:H37Rv	/cip0/research/projects/combattb/data/zahra/reference_H37Rv.fasta
