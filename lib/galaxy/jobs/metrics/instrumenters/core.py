@@ -1,3 +1,4 @@
+"""The module describes the ``core`` job metrics plugin."""
 import logging
 import time
 
@@ -83,4 +84,4 @@ class CorePlugin( InstrumentPlugin ):
             pass
         return value
 
-__all__ = [ 'CorePlugin' ]
+__all__ = ( 'CorePlugin', )
