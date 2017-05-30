@@ -13,6 +13,8 @@ IN_VENV=if [ -f $(VENV)/bin/activate ]; then . $(VENV)/bin/activate; fi;
 PROJECT_URL?=https://github.com/galaxyproject/galaxy
 GRUNT_DOCKER_NAME:=galaxy/client-builder:16.01
 GRUNT_EXEC?=node_modules/grunt-cli/bin/grunt
+WEBPACK_EXEC?=node_modules/webpack/bin/webpack.js
+GXY_NODE_MODULES=client/node_modules
 DOCS_DIR=doc
 DOC_SOURCE_DIR=$(DOCS_DIR)/source
 SLIDESHOW_DIR=$(DOC_SOURCE_DIR)/slideshow
@@ -20,9 +22,14 @@ OPEN_RESOURCE=bash -c 'open $$0 || xdg-open $$0'
 SLIDESHOW_TO_PDF?=bash -c 'docker run --rm -v `pwd`:/cwd astefanutti/decktape /cwd/$$0 /cwd/`dirname $$0`/`basename -s .html $$0`.pdf'
 
 all: help
-	@echo "This makefile is primarily used for building Galaxy's JS client. A sensible all target is not yet implemented."
+	@echo "This makefile is used for building Galaxy's JS client, documentation, and drive the release process. A sensible all target is not implemented."
 
-docs: ## generate Sphinx HTML documentation, including API docs
+docs: ## Generate HTML documentation.
+# Run following commands to setup the Python portion of the requirements:
+#   $ ./scripts/common_startup.sh
+#   $ . .venv/bin/activate
+#   $ pip install -r lib/galaxy/dependencies/dev-requirements.txt
+# You also need to install pandoc separately.
 	$(IN_VENV) $(MAKE) -C doc clean
 	$(IN_VENV) $(MAKE) -C doc html
 
@@ -87,6 +94,9 @@ client-install-libs: npm-deps ## Fetch updated client dependencies using bower.
 
 client: grunt style ## Rebuild all client-side artifacts
 
+charts: npm-deps ## Rebuild charts
+	NODE_PATH=$(GXY_NODE_MODULES) client/$(WEBPACK_EXEC) -p --config config/plugins/visualizations/charts/webpack.config.js
+
 grunt-docker-image: ## Build docker image for running grunt
 	docker build -t ${GRUNT_DOCKER_NAME} client
 
@@ -138,8 +148,6 @@ release-create-rc: release-ensure-upstream ## Create a release-candidate branch
 	git push $(MY_UPSTREAM) version-$(RELEASE_CURR):version-$(RELEASE_CURR)
 	git push $(MY_UPSTREAM) version-$(RELEASE_NEXT).dev:version-$(RELEASE_NEXT).dev
 	git checkout dev
-	git branch -d version-$(RELEASE_CURR)
-	git branch -d version-$(RELEASE_NEXT).dev
 	# TODO: Use hub to automate these PR creations or push directly.
 	@echo "Open a PR from version-$(RELEASE_CURR) of your fork to release_$(RELEASE_CURR)"
 	@echo "Open a PR from version-$(RELEASE_NEXT).dev of your fork to dev"
